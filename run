@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ./run <agent|read-only> [grok|mimo|deepseek]
+       ./run web
+       ./run web-agent [grok|mimo|deepseek]
+       ./run desktop [grok|mimo|deepseek]
+       ./run desktop-build [grok|mimo|deepseek]
+
+Starts RunBuild with Grok 4.5 by default. Grok uses the current
+GROK_HOME login or an explicitly provided XAI_API_KEY. MiMo and DeepSeek
+remain available through explicit profiles and their provider environment keys.
+"web" starts the local RunBuild Web UI.
+"web-agent" starts both the local Web UI and an authenticated ACP agent bridge.
+"desktop" starts the RunBuild desktop client.
+"desktop-build" creates a double-clickable RunBuild macOS app in webui/release.
+EOF
+}
+
+mode="${1:-}"
+model_profile="${2:-grok}"
+case "$mode" in
+  agent) sandbox="workspace" ;;
+  read-only) sandbox="read-only" ;;
+  web)
+    root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "npm is required to run the Web UI" >&2
+      exit 1
+    fi
+    cd "$root_dir/webui"
+    if [[ ! -d node_modules ]]; then
+      npm install
+    fi
+    exec npm run dev
+    ;;
+  web-agent) sandbox="workspace" ;;
+  desktop|desktop-build) sandbox="workspace" ;;
+  -h|--help|help|"") usage; exit 0 ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+case "$model_profile" in
+  grok|grok-4.5)
+    model_profile="grok-4.5"
+    required_key=""
+    ;;
+  mimo)
+    required_key="MIMO_API_KEY"
+    ;;
+  deepseek)
+    model_profile="deepseek-v4-pro"
+    required_key="DEEPSEEK_API_KEY"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "$required_key" && -z "${!required_key:-}" ]]; then
+  uni_env_file="${UNI_ENV_FILE:-}"
+  if [[ -n "$uni_env_file" ]]; then
+    if [[ ! -f "$uni_env_file" ]]; then
+      echo "Provider environment file not found: $uni_env_file" >&2
+      exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$uni_env_file"
+    set +a
+  fi
+  if [[ -z "${!required_key:-}" ]]; then
+    echo "$required_key is not configured; export it or set UNI_ENV_FILE explicitly" >&2
+    exit 1
+  fi
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  rust_bin="$(find /opt/homebrew/Cellar/rust -path '*/bin/cargo' -type f 2>/dev/null | sort -V | tail -1 || true)"
+  if [[ -z "$rust_bin" ]]; then
+    echo "cargo is not installed or not on PATH" >&2
+    exit 1
+  fi
+  export PATH="$(dirname "$rust_bin"):$PATH"
+fi
+
+export GROK_HOME="${GROK_HOME:-$root_dir/.personal-grok}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/grok-build-target}"
+
+if [[ "$mode" == "desktop" || "$mode" == "desktop-build" ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to run the desktop client" >&2
+    exit 1
+  fi
+  personal_agent_binary="$CARGO_TARGET_DIR/debug/xai-grok-pager"
+  if [[ ! -x "$personal_agent_binary" ]]; then
+    (
+      cd "$root_dir"
+      cargo build -p xai-grok-pager-bin
+    )
+  fi
+  export PERSONAL_AGENT_WORKSPACE="$root_dir"
+  export PERSONAL_AGENT_MODEL_PROFILE="$model_profile"
+  export PERSONAL_AGENT_BINARY="$personal_agent_binary"
+  cd "$root_dir/webui"
+  if [[ ! -d node_modules ]]; then
+    npm install
+  fi
+  if [[ "$mode" == "desktop-build" ]]; then
+    export PERSONAL_AGENT_PACK_BINARY="$personal_agent_binary"
+    exec npm run desktop:pack
+  fi
+  exec npm run desktop:dev
+fi
+
+if [[ "$mode" == "web-agent" ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to run the Web UI" >&2
+    exit 1
+  fi
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "openssl is required to generate the local bridge secret" >&2
+    exit 1
+  fi
+
+  agent_port="${PERSONAL_AGENT_PORT:-2419}"
+  web_port="${PERSONAL_AGENT_WEB_PORT:-5173}"
+  if nc -z 127.0.0.1 "$agent_port" 2>/dev/null; then
+    echo "Agent port 127.0.0.1:${agent_port} is already in use" >&2
+    exit 1
+  fi
+  bridge_secret="$(openssl rand -hex 24)"
+  export GROK_AGENT_SECRET="$bridge_secret"
+  export PERSONAL_AGENT_BRIDGE_ENABLED=1
+  export PERSONAL_AGENT_BRIDGE_SECRET="$bridge_secret"
+  export PERSONAL_AGENT_BRIDGE_TARGET="ws://127.0.0.1:${agent_port}"
+  export PERSONAL_AGENT_WORKSPACE="$root_dir"
+  export PERSONAL_AGENT_PROJECTS_ROOT="$GROK_HOME/projects"
+  export PERSONAL_AGENT_PROJECT_REGISTRY="$GROK_HOME/webui/projects.json"
+  export PERSONAL_AGENT_MODEL_PROFILE="$model_profile"
+  export PERSONAL_AGENT_BINARY="$CARGO_TARGET_DIR/debug/xai-grok-pager"
+  agent_log="$GROK_HOME/web-agent.log"
+  mkdir -p "$GROK_HOME"
+
+  cleanup() {
+    if [[ -n "${agent_pid:-}" ]]; then
+      kill "$agent_pid" 2>/dev/null || true
+      wait "$agent_pid" 2>/dev/null || true
+    fi
+  }
+  trap cleanup EXIT INT TERM
+
+  (
+    cd "$root_dir"
+    cargo run -p xai-grok-pager-bin -- --sandbox "$sandbox" --permission-mode default --model "$model_profile" agent serve --bind "127.0.0.1:${agent_port}"
+  ) >"$agent_log" 2>&1 &
+  agent_pid=$!
+
+  for _ in {1..240}; do
+    if ! kill -0 "$agent_pid" 2>/dev/null; then
+      wait "$agent_pid"
+      echo "Agent server exited. Check $agent_log" >&2
+      exit 1
+    fi
+    if nc -z 127.0.0.1 "$agent_port" 2>/dev/null; then
+      break
+    fi
+    sleep 0.25
+  done
+
+  if ! nc -z 127.0.0.1 "$agent_port" 2>/dev/null; then
+    echo "Agent server did not start on 127.0.0.1:${agent_port}" >&2
+    exit 1
+  fi
+
+  cd "$root_dir/webui"
+  if [[ ! -d node_modules ]]; then
+    npm install
+  fi
+  npm run dev -- --port "$web_port"
+  exit $?
+fi
+
+cd "$root_dir"
+exec cargo run -p xai-grok-pager-bin -- --sandbox "$sandbox" --model "$model_profile"

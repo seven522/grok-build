@@ -1,44 +1,67 @@
 <div align="center">
 
 <h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://media.x.ai/v1/website/spacexai-symbol-white-transparent-0c31957f.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png">
-    <img alt="SpaceXAI logo" src="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png" width="96">
-  </picture>
+  <img alt="RunBuild icon" src="webui/public/grok-build-icon.png" width="96">
   <br>
-  Grok Build (<code>grok</code>)
+  RunBuild
 </h1>
 
-**Grok Build** is SpaceXAI's terminal-based AI coding agent. It runs as a
-full-screen TUI that understands your codebase, edits files, executes shell
-commands, searches the web, and manages long-running tasks — interactively,
-headlessly for scripting/CI, or embedded in editors via the Agent Client
-Protocol (ACP).
+**RunBuild** is a local-first, project-bound workbench for coding agents. It
+binds each project to a real working directory, starts isolated project
+runners, restores ACP sessions, and exposes tool activity and write approval
+through a Web or desktop client.
 
-[Installing the released binary](#installing-the-released-binary) ·
-[Building from source](#building-from-source) ·
-[Documentation](#documentation) ·
+[Run locally](#runbuild-local-workbench) ·
+[WebUI guide](webui/README.md) ·
+[Upstream runtime](#upstream-grok-build-runtime) ·
 [Repository layout](#repository-layout) ·
 [Development](#development) ·
-[Contributing](#contributing) ·
 [License](#license)
-
-![Grok Build TUI](https://media.x.ai/v1/website/universe-tui-screenshot-6f7a0837.png)
-
-**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli)**
-
-This repository contains the Rust source for the `grok` CLI/TUI and its agent
-runtime. It is synced periodically from the SpaceXAI monorepo.
-
-A small `SOURCE_REV` file at the root records the full monorepo commit SHA
-for the version of the code present in this tree.
 
 </div>
 
 ---
 
-## Installing the released binary
+## RunBuild local workbench
+
+Start the Web client with an authenticated local Agent bridge:
+
+```sh
+./run web-agent
+```
+
+Or launch the Electron desktop client:
+
+```sh
+./run desktop
+```
+
+RunBuild starts Grok 4.5 by default and keeps model credentials outside the
+page process. Grok uses the current RunBuild login or an explicitly provided
+`XAI_API_KEY`; MiMo and DeepSeek remain available through explicit profiles.
+See [`webui/README.md`](webui/README.md) for service lifecycle, project,
+session, and sandbox details.
+
+## Upstream Grok Build runtime
+
+RunBuild uses SpaceXAI's **Grok Build** terminal coding-agent runtime. Grok
+Build runs as a full-screen TUI, headlessly for scripting or CI, and through
+the Agent Client Protocol (ACP). The upstream `grok` CLI, `xai-grok-*` crates,
+configuration paths, and protocol identifiers retain their original names for
+compatibility.
+
+![Upstream Grok Build TUI](https://media.x.ai/v1/website/universe-tui-screenshot-6f7a0837.png)
+
+**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli)**
+
+This repository contains the upstream Rust source for the `grok` CLI/TUI and
+its agent runtime alongside the local RunBuild clients. The upstream source is
+synced periodically from the SpaceXAI monorepo.
+
+A small `SOURCE_REV` file at the root records the full monorepo commit SHA
+for the version of the code present in this tree.
+
+## Installing the upstream CLI
 
 Prebuilt binaries are published for macOS, Linux, and Windows:
 
@@ -51,7 +74,7 @@ grok --version
 See the [changelog](https://x.ai/build/changelog) for the latest fixes,
 features, and improvements in each release.
 
-## Building from source
+## Building the upstream runtime from source
 
 Requirements:
 
@@ -82,7 +105,7 @@ The binary artifact is named `xai-grok-pager`; official installs ship it as
 `grok`. On first launch it opens your browser to authenticate — see the
 [authentication guide](crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md).
 
-## Documentation
+## Upstream runtime documentation
 
 Full online documentation is available at
 [docs.x.ai/build/overview](https://docs.x.ai/build/overview).
@@ -96,6 +119,8 @@ MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
 
 | Path | Contents |
 |------|----------|
+| `webui` | RunBuild React, Vite, and Electron client |
+| `run` | Local RunBuild launcher for Web, desktop, and Agent modes |
 | `crates/codegen/xai-grok-pager-bin` | Composition-root package; builds the `xai-grok-pager` binary |
 | `crates/codegen/xai-grok-pager` | The TUI: scrollback, prompt, modals, rendering |
 | `crates/codegen/xai-grok-shell` | Agent runtime + leader/stdio/headless entry points |

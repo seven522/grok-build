@@ -1,0 +1,15 @@
+# RunBuild: Xiaomi MiMo through its OpenAI-compatible Chat Completions API.
+#
+# Keep credentials out of this file. Export MIMO_API_KEY in your shell (or load
+# it from your existing uni/.env) before launching RunBuild.
+
+[models]
+default = "personal-mimo"
+
+[model.personal-mimo]
+model = "mimo-v2.5-pro"
+base_url = "https://api.xiaomimimo.com/v1"
+name = "Personal MiMo"
+description = "Personal coding agent powered by MiMo"
+env_key = "MIMO_API_KEY"
+api_backend = "chat_completions"

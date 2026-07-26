@@ -1,0 +1,50 @@
+# RunBuild model catalog.
+#
+# Keep this file provider-neutral: the Agent selects its active model with
+# [models].default, while every provider is an independent [model.<profile>]
+# entry. Credentials always come from environment variables.
+
+[models]
+# Switch this value to any profile declared below.
+default = "mimo"
+
+# Current default: the MiMo model already configured in the local uni project.
+[model.mimo]
+model = "mimo-v2.5-pro"
+base_url = "https://api.xiaomimimo.com/v1"
+name = "MiMo"
+env_key = "MIMO_API_KEY"
+api_backend = "chat_completions"
+
+# The DeepSeek expert model already configured in the local uni project.
+[model.deepseek-v4-pro]
+model = "deepseek-v4-pro"
+base_url = "https://api.deepseek.com"
+name = "DeepSeek V4 Pro"
+env_key = "DEEPSEEK_API_KEY"
+api_backend = "chat_completions"
+
+# Any OpenAI-compatible Chat Completions provider, including self-hosted ones.
+[model.openai-compatible]
+model = "replace-with-model-id"
+base_url = "https://replace-with-provider.example/v1"
+name = "OpenAI-compatible model"
+env_key = "PERSONAL_AGENT_API_KEY"
+api_backend = "chat_completions"
+
+# OpenAI-compatible Responses API provider.
+[model.responses-compatible]
+model = "replace-with-model-id"
+base_url = "https://replace-with-provider.example/v1"
+name = "Responses-compatible model"
+env_key = "PERSONAL_AGENT_API_KEY"
+api_backend = "responses"
+
+# Anthropic Messages API. ${ANTHROPIC_API_KEY} is resolved from the process
+# environment; do not replace it with a literal key.
+[model.anthropic-compatible]
+model = "replace-with-model-id"
+base_url = "https://api.anthropic.com/v1"
+name = "Anthropic-compatible model"
+api_backend = "messages"
+extra_headers = { "x-api-key" = "${ANTHROPIC_API_KEY}", "anthropic-version" = "2023-06-01" }
