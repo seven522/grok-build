@@ -1,0 +1,9 @@
+Imported and adapted from:
+https://github.com/jnMetaCode/agency-agents-zh/tree/main/design
+
+Source commit: cf086f76a225f7b287db0953940f76df6df8d1e3
+Imported: 2026-07-22
+
+The nine specialist prompt bodies are retained from the Chinese-localized
+source. YAML frontmatter was adapted to Grok Build's native agent schema.
+See LICENSE in this directory for attribution and MIT license terms.
