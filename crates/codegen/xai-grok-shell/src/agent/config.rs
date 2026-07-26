@@ -4359,16 +4359,31 @@ impl ModelEntry {
         }
     }
     /// Non-empty `api_key`, else first non-empty resolved `env_key`.
-    /// `None` → fall through to session / global key. Static only: never
-    /// consults auth-provider tokens.
+    /// `None` means no usable static value; callers must separately respect a
+    /// configured-but-missing `env_key` boundary before any fallback. Static
+    /// only: never consults auth-provider tokens.
     pub(crate) fn own_credential(&self) -> Option<String> {
         first_own_credential(self.api_key.as_deref(), self.env_key.as_ref())
     }
-    /// The provider governing this model's bearer: `None` when a static
-    /// `api_key`/`env_key` resolves. The turn paths consult this, so a
-    /// shadowed provider never runs.
+    /// Whether this entry declares a non-empty `env_key` boundary, regardless
+    /// of whether that environment variable is currently set. Once declared,
+    /// the model must not fall through to an xAI session/global credential.
+    pub(crate) fn has_configured_env_key(&self) -> bool {
+        self.env_key.as_ref().is_some_and(|keys| !keys.is_empty())
+    }
+    /// Whether authentication is model-scoped rather than governed by the xAI
+    /// session. A configured-but-missing `env_key` still counts: it is a failed
+    /// model credential, not permission to reuse the xAI bearer.
+    pub(crate) fn has_model_scoped_auth(&self) -> bool {
+        self.own_credential().is_some()
+            || self.has_configured_env_key()
+            || self.auth_provider.is_some()
+    }
+    /// The provider governing this model's bearer: `None` when static auth is
+    /// configured, including a missing declared `env_key`. The turn paths
+    /// consult this, so a shadowed provider never runs.
     pub(crate) fn effective_auth_provider(&self) -> Option<&crate::auth::AuthProviderRef> {
-        if self.own_credential().is_some() {
+        if self.own_credential().is_some() || self.has_configured_env_key() {
             return None;
         }
         self.auth_provider.as_ref()
@@ -4748,6 +4763,48 @@ pub struct ResolvedCredentials {
     pub auth_type: xai_chat_state::AuthType,
     pub auth_scheme: AuthScheme,
 }
+/// A model declares `env_key`, but none of its named variables currently
+/// contains a usable value. Names are safe to surface; values are never kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct MissingModelCredential {
+    pub(crate) model: String,
+    pub(crate) env_keys: Vec<String>,
+}
+impl MissingModelCredential {
+    pub(crate) fn message(&self) -> String {
+        let primary = self
+            .env_keys
+            .first()
+            .map(String::as_str)
+            .unwrap_or("Provider API key");
+        format!(
+            "{primary} is not configured for model '{}'. Set {} and retry.",
+            self.model,
+            self.env_keys.join(" or "),
+        )
+    }
+}
+/// Return the explicit missing-env boundary for a model. A non-empty inline
+/// `api_key` remains the higher-priority explicit credential.
+pub(crate) fn missing_required_model_credential(
+    model: &ModelEntry,
+) -> Option<MissingModelCredential> {
+    if model
+        .api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty())
+    {
+        return None;
+    }
+    let env_keys = model.env_key.as_ref().filter(|keys| !keys.is_empty())?;
+    if env_keys.resolve_value().is_some() {
+        return None;
+    }
+    Some(MissingModelCredential {
+        model: model.info().model.clone(),
+        env_keys: env_keys.names().into_iter().map(str::to_owned).collect(),
+    })
+}
 /// First usable BYOK credential: a non-empty (trimmed) api_key, else the first
 /// set, non-empty env_key value. Single source of truth for has_own_credentials,
 /// resolve_credentials, and the JWT-reload path.
@@ -4761,12 +4818,25 @@ pub(crate) fn first_own_credential(
         .or_else(|| env_key.and_then(EnvKeys::resolve_value))
 }
 /// Priority: model api_key/env_key > cached auth-provider token > session
-/// token > XAI_API_KEY.
+/// token > XAI_API_KEY. A declared `env_key` is a hard provider boundary:
+/// when unset, resolution fails closed instead of reusing an xAI credential.
 pub fn resolve_credentials(model: &ModelEntry, session_key: Option<&str>) -> ResolvedCredentials {
     let info = model.info();
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
         (
             Some(key),
+            info.base_url.clone(),
+            xai_chat_state::AuthType::ApiKey,
+        )
+    } else if model.has_configured_env_key() {
+        let env_keys = model.env_key.as_ref().expect("configured env_key");
+        tracing::warn!(
+            model = % info.model, env_key = % env_keys,
+            "model has env_key configured but none of the environment variables are set — \
+             refusing xAI credential fallback",
+        );
+        (
+            None,
             info.base_url.clone(),
             xai_chat_state::AuthType::ApiKey,
         )
@@ -4923,7 +4993,7 @@ pub fn resolve_model_auth_facts_and_provider(
 fn byok_from_lookup(lookup: &ModelLookup) -> ModelByok {
     match lookup {
         ModelLookup::ConfigUnavailable => ModelByok::Unknown,
-        ModelLookup::Loaded(Some(e)) if e.has_own_credentials() => ModelByok::Byok,
+        ModelLookup::Loaded(Some(e)) if e.has_model_scoped_auth() => ModelByok::Byok,
         ModelLookup::Loaded(_) => ModelByok::NotByok,
     }
 }
@@ -6705,7 +6775,7 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
-    fn resolve_credentials_empty_env_key_falls_through_to_session() {
+    fn resolve_credentials_missing_env_key_fails_closed_without_session_fallback() {
         use xai_chat_state::AuthType;
         use xai_grok_test_support::EnvGuard;
         let primary = "GROK_TEST_EMPTY_ENV_PRIMARY";
@@ -6714,14 +6784,13 @@ reasoning_effort = "low"
         let _alias = EnvGuard::set(alias, "");
         let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
         model.env_key = Some(EnvKeys::new([primary, alias]));
-        assert!(!model.has_own_credentials());
         let creds = resolve_credentials(&model, Some("session-jwt"));
-        assert_eq!(creds.auth_type, AuthType::SessionToken);
-        assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
+        assert_eq!(creds.auth_type, AuthType::ApiKey);
+        assert_eq!(creds.api_key, None);
     }
     #[test]
     #[serial]
-    fn resolve_credentials_empty_env_key_falls_through_to_global_key() {
+    fn resolve_credentials_missing_env_key_fails_closed_without_xai_global_fallback() {
         use crate::agent::auth_method::{LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR};
         use xai_chat_state::AuthType;
         use xai_grok_test_support::EnvGuard;
@@ -6734,10 +6803,9 @@ reasoning_effort = "low"
         let _legacy = EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR);
         let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
         model.env_key = Some(EnvKeys::new([primary, alias]));
-        assert!(!model.has_own_credentials());
         let creds = resolve_credentials(&model, None);
         assert_eq!(creds.auth_type, AuthType::ApiKey);
-        assert_eq!(creds.api_key.as_deref(), Some(sentinel));
+        assert_eq!(creds.api_key, None);
     }
     #[test]
     fn resolve_credentials_empty_api_key_falls_through_to_session() {
@@ -7009,6 +7077,13 @@ reasoning_effort = "low"
         assert_eq!(
             byok_from_lookup(&ModelLookup::Loaded(Some(&byok))),
             ModelByok::Byok,
+        );
+        let mut missing_env = test_model_entry("m", "https://api.example.com/v1", None, None, None);
+        missing_env.env_key = Some(EnvKeys::single("GROK_TEST_MISSING_PROVIDER_API_KEY"));
+        assert_eq!(
+            byok_from_lookup(&ModelLookup::Loaded(Some(&missing_env))),
+            ModelByok::Byok,
+            "a configured-but-missing model env_key is still a BYOK boundary",
         );
         let session = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
         assert_eq!(

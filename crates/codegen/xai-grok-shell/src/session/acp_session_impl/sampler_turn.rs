@@ -2,6 +2,17 @@
 //! facts/gates and retry, sampler config reconstruction, sampling-failure
 //! recovery, and per-response usage recording.
 use super::*;
+fn missing_model_credential_error_data(
+    missing: &crate::agent::config::MissingModelCredential,
+) -> serde_json::Value {
+    serde_json::json!({
+        "message": missing.message(),
+        "http_status": serde_json::Value::Null,
+        "error_type": "missing_model_credential",
+        "model": missing.model,
+        "env_keys": missing.env_keys,
+    })
+}
 /// Auth-failure detector for tool errors. Matches strictly on HTTP 401
 /// when the error carries a structured status code, mirroring
 /// `SamplingError::is_auth_error` in xai-grok-sampling-types: 403 is
@@ -108,6 +119,41 @@ where
     }
 }
 impl SessionActor {
+    /// Fail before sampler submission when a model explicitly requires an
+    /// `env_key` that is not present. This keeps xAI session credentials out of
+    /// third-party requests and gives ACP clients a structured setup error.
+    pub(super) async fn ensure_required_model_credential(&self) -> Result<(), acp::Error> {
+        let model_id = self
+            .chat_state_handle
+            .get_sampling_config()
+            .await
+            .map(|config| config.model)
+            .unwrap_or_default();
+        let models = self.models_manager.models();
+        let Some(model) = crate::agent::config::find_model_by_id(&models, &model_id) else {
+            return Ok(());
+        };
+        let Some(missing) = crate::agent::config::missing_required_model_credential(model) else {
+            return Ok(());
+        };
+        let message = missing.message();
+        xai_grok_telemetry::unified_log::warn(
+            "turn preflight: required model credential missing",
+            Some(self.session_info.id.0.as_ref()),
+            Some(serde_json::json!({
+                "model": missing.model,
+                "env_keys": missing.env_keys,
+            })),
+        );
+        self.send_xai_notification(XaiSessionUpdate::RetryState(
+            crate::extensions::notification::RetryState::Failed {
+                error_type: "missing_model_credential".to_string(),
+                message,
+            },
+        ))
+        .await;
+        Err(acp::Error::internal_error().data(missing_model_credential_error_data(&missing)))
+    }
     pub(super) async fn prepare_tool_definitions_timed(&self) -> (Vec<ToolDefinition>, u64) {
         let mcp_wait_start = std::time::Instant::now();
         match self.mcp_strategy {
@@ -1119,6 +1165,7 @@ impl SessionActor {
         self: &Arc<Self>,
         request: ConversationRequest,
     ) -> Result<SamplerTurnOutcome, acp::Error> {
+        self.ensure_required_model_credential().await?;
         self.prepare_sampler_for_turn().await;
         let stream_drained_rx = {
             let (tx, rx) = tokio::sync::oneshot::channel();

@@ -259,8 +259,9 @@ pub fn acp_tool_update(
         }
         ToolOutput::Bash(bash_output) => {
             let is_backgrounded = bash_output.signal.as_deref() == Some("backgrounded");
-            let is_failure =
-                bash_output.timed_out || (bash_output.signal.is_some() && !is_backgrounded);
+            let is_failure = bash_output.exit_code != 0
+                || bash_output.timed_out
+                || (bash_output.signal.is_some() && !is_backgrounded);
             let status = if is_backgrounded {
                 None
             } else if is_failure {
@@ -1126,6 +1127,29 @@ mod tests {
             }
             other => panic!("Expected Bash, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_acp_tool_update_bash_nonzero_exit_code_returns_failed() {
+        let output = ToolOutput::Bash(BashOutput {
+            output: b"operation not permitted\n".to_vec(),
+            output_for_prompt: String::new(),
+            exit_code: 1,
+            command: "touch /outside/project/file".to_string(),
+            truncated: false,
+            signal: None,
+            timed_out: false,
+            description: None,
+            current_dir: "/workspace".to_string(),
+            output_file: String::new(),
+            output_delta: None,
+            total_bytes: 24,
+            was_bare_echo: false,
+        });
+
+        let update = acp_tool_update(&output, "call-1", None, None).unwrap();
+
+        assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Failed));
     }
 
     #[test]

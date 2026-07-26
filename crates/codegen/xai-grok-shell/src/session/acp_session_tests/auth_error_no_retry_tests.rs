@@ -204,6 +204,42 @@ async fn sampler_401_recovery_returns_refresh_and_retry() {
         .await;
 }
 
+/// A custom provider endpoint must never enter xAI OIDC recovery, even when
+/// the persisted auth method is session-based and model lookup says NotByok.
+#[tokio::test(flavor = "current_thread")]
+async fn sampler_401_on_custom_endpoint_never_refreshes_xai_session() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let called = Arc::new(AtomicBool::new(false));
+            let refresher: Arc<dyn crate::auth::refresh::TokenRefresher> =
+                Arc::new(AlwaysSucceedRefresher {
+                    called: called.clone(),
+                });
+            let (_dir, am) = auth_manager_with_refresher(refresher);
+            let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
+            let mut sampling = actor
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .expect("test sampling config");
+            sampling.base_url = "https://third-party.example/v1".to_string();
+            actor.chat_state_handle.update_sampling_config(sampling);
+
+            let result = actor.handle_sampling_failure(auth_error()).await;
+
+            assert!(
+                result.is_err(),
+                "a third-party 401 must surface instead of entering xAI auth recovery"
+            );
+            assert!(
+                !called.load(Ordering::SeqCst),
+                "a third-party 401 must never invoke the xAI OIDC refresher"
+            );
+        })
+        .await;
+}
+
 /// Regression: sampler 401 with API-key auth (BYOK `env_key` /
 /// `XAI_API_KEY`) must NOT attempt an OIDC session-token refresh. The
 /// bearer on the wire is the static API key, so refreshing the session
@@ -732,10 +768,8 @@ fn session_token_auth_gate_truth_table() {
         assert!(!gate(false, ModelByok::NotByok, fp));
         assert!(!gate(false, ModelByok::Byok, fp));
         assert!(!gate(false, ModelByok::Unknown, fp));
-        // Session method: a definite classification ignores the endpoint —
-        // NotByok always refreshes (only ever routes to the session endpoint),
-        // a genuine per-model Byok never does.
-        assert!(gate(true, ModelByok::NotByok, fp));
+        // Session auth is only refreshable for first-party xAI requests.
+        assert_eq!(gate(true, ModelByok::NotByok, fp), fp);
         assert!(!gate(true, ModelByok::Byok, fp));
     }
     // Session method + Unknown BYOK: refresh only against a first-party xAI
@@ -744,6 +778,93 @@ fn session_token_auth_gate_truth_table() {
     // third-party BYOK endpoint. This arm was unconditionally `false` pre-fix.
     assert!(gate(true, ModelByok::Unknown, true));
     assert!(!gate(true, ModelByok::Unknown, false));
+}
+
+/// A declared third-party `env_key` is a hard credential boundary: when the
+/// variable is absent, the turn returns structured ACP data before the sampler
+/// submit path. Supplying the variable makes the same preflight pass.
+#[tokio::test(flavor = "current_thread")]
+#[serial_test::serial]
+async fn missing_model_env_key_fails_before_sampler_submit_with_structured_data() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            use xai_grok_test_support::EnvGuard;
+
+            let env_key = "GROK_TEST_DEEPSEEK_API_KEY_MISSING_PREFLIGHT";
+            let missing_guard = EnvGuard::unset(env_key);
+            let (gateway_tx, _) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let mut actor =
+                create_test_actor(50_000, 100_000, 85, gateway_tx, persistence_tx).await;
+
+            let mut model = crate::agent::config::ModelEntry::fallback(
+                "deepseek-v4-pro",
+                &crate::agent::config::EndpointsConfig::default(),
+            );
+            model.info.base_url = "https://api.deepseek.example/v1".to_string();
+            model.env_key = Some(crate::agent::config::EnvKeys::single(env_key));
+            let mut models = indexmap::IndexMap::new();
+            models.insert("deepseek-v4-pro".to_string(), model);
+
+            let auth_home = tempfile::tempdir().expect("auth tempdir");
+            let models_auth =
+                Arc::new(AuthManager::new(auth_home.path(), GrokComConfig::default()));
+            actor.models_manager = crate::agent::models::ModelsManager::new(
+                None,
+                models,
+                acp::ModelId::new("deepseek-v4-pro"),
+                models_auth,
+                crate::agent::config::Config::default(),
+            );
+            let mut sampling = actor
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .expect("test sampling config");
+            sampling.model = "deepseek-v4-pro".to_string();
+            sampling.base_url = "https://api.deepseek.example/v1".to_string();
+            actor.chat_state_handle.update_sampling_config(sampling);
+            actor
+                .chat_state_handle
+                .update_credentials(xai_chat_state::Credentials {
+                    api_key: Some("xai-session-jwt".to_string()),
+                    auth_type: xai_chat_state::AuthType::SessionToken,
+                    ..Default::default()
+                });
+            let actor = Arc::new(actor);
+
+            let err = match actor
+                .run_turn_via_sampler(ConversationRequest::default())
+                .await
+            {
+                Err(err) => err,
+                Ok(_) => panic!("missing env_key must fail before sampler submission"),
+            };
+            let data = err.data.expect("structured missing-credential data");
+            assert_eq!(
+                data.get("error_type").and_then(serde_json::Value::as_str),
+                Some("missing_model_credential")
+            );
+            assert_eq!(data.get("http_status"), Some(&serde_json::Value::Null),);
+            let message = data
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .expect("missing-credential message");
+            assert!(message.contains(&format!("{env_key} is not configured")));
+            assert_eq!(
+                data.get("env_keys").and_then(serde_json::Value::as_array),
+                Some(&vec![serde_json::Value::String(env_key.to_string())]),
+            );
+
+            drop(missing_guard);
+            let _present_guard = EnvGuard::set(env_key, "fake-provider-key");
+            actor
+                .ensure_required_model_credential()
+                .await
+                .expect("configured env_key should pass preflight");
+        })
+        .await;
 }
 
 /// Pre-fix, the gate read `auth_type` and skipped recovery here, 401'ing every
