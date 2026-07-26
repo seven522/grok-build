@@ -1,0 +1,80 @@
+/*
+ * Aceternity/shadcn migration layer.
+ *
+ * Tailwind Preflight stays disabled while Mantine and Aceternity coexist so
+ * registry components cannot reset the existing desktop workbench globally.
+ */
+@layer theme, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@theme inline {
+  --color-background: var(--ide-bg);
+  --color-foreground: var(--ide-text);
+  --color-card: var(--ide-panel);
+  --color-card-foreground: var(--ide-text);
+  --color-popover: var(--ide-modal-bg);
+  --color-popover-foreground: var(--ide-text);
+  --color-primary: var(--ide-accent);
+  --color-primary-foreground: var(--ide-send-text);
+  --color-secondary: var(--ide-panel-strong);
+  --color-secondary-foreground: var(--ide-text-strong);
+  --color-muted: var(--ide-inset-bg);
+  --color-muted-foreground: var(--ide-text-muted);
+  --color-accent: var(--ide-hover);
+  --color-accent-foreground: var(--ide-text);
+  --color-destructive: var(--ide-danger);
+  --color-border: var(--ide-border);
+  --color-input: var(--ide-control-bg);
+  --color-ring: var(--ide-accent);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+.aceternity-tab {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.aceternity-tab-indicator {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid var(--ide-border);
+  border-radius: inherit;
+  background: var(--ide-selected);
+}
+
+.aceternity-tab-indicator::after {
+  position: absolute;
+  right: 9px;
+  bottom: 2px;
+  left: 9px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--ide-accent);
+  content: '';
+}
+
+.aceternity-tab-label {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aceternity-motion-safe,
+  .aceternity-tab-indicator {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,3 +1,25 @@
 /target
 **/*.rs.bk
 .DS_Store
+.personal-grok/*
+!.personal-grok/agents/
+.personal-grok/agents/*
+!.personal-grok/agents/design-*.md
+!.personal-grok/agents/LICENSE
+!.personal-grok/agents/SOURCE
+!.personal-grok/skills/
+.personal-grok/skills/*
+!.personal-grok/skills/design-experts/
+!.personal-grok/skills/design-experts/SKILL.md
+webui/node_modules/
+webui/dist/
+webui/dist-desktop/
+webui/release/
+
+# RunBuild desktop client (webui)
+webui/.DS_Store
+webui/**/.DS_Store
+webui/*.log
+webui/.vite/
+webui/coverage/
+webui/release*/

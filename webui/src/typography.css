@@ -1,0 +1,129 @@
+/*
+ * RunBuild typography system
+ *
+ * Component styles consume semantic tokens from this file. Keep locale-specific
+ * font fallbacks and rhythm adjustments here so future translations do not
+ * require editing individual screens.
+ */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* Semantic type scale — 12 / 13 / 14 / 15 / 16 / 18 / 22 / 32 / brand display. */
+  --type-caption: 0.75rem;
+  --type-label: 0.8125rem;
+  --type-body: 0.875rem;
+  --type-body-lg: 0.9375rem;
+  --type-card-title: 1rem;
+  --type-section-title: 1.125rem;
+  --type-dialog-title: 1.375rem;
+  --type-page-title: 2rem;
+  --type-display-min: 1.75rem;
+  --type-display-max: 2.375rem;
+  --type-brand-lockup: 4.25rem;
+  --type-brand-lockup-mobile: 2.625rem;
+  --type-code: 0.8125rem;
+  --type-code-inline: 0.88em;
+
+  --leading-compact: 1.25;
+  --leading-ui: 1.4;
+  --leading-body: 1.6;
+  --leading-reading: 1.72;
+  --leading-heading: 1.2;
+  --leading-code: 1.6;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --tracking-tight: -0.02em;
+  --tracking-label: 0.04em;
+}
+
+html {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-synthesis: none;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-body);
+  font-kerning: normal;
+  font-feature-settings: "kern", "liga", "clig", "calt";
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: var(--type-body);
+  line-height: var(--leading-ui);
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+}
+
+.mantine-Button-label,
+.mantine-ActionIcon-root,
+.mantine-Menu-itemLabel,
+.mantine-Tabs-tabLabel {
+  line-height: var(--leading-ui);
+}
+
+.mantine-Input-input {
+  font-size: var(--type-body);
+  line-height: var(--leading-ui);
+}
+
+.mantine-InputWrapper-label,
+.mantine-Modal-title {
+  font-size: var(--type-label);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.mantine-InputWrapper-description,
+.mantine-InputWrapper-error,
+.mantine-Tooltip-tooltip,
+.mantine-Badge-label,
+.mantine-Kbd-root {
+  font-size: var(--type-caption);
+  line-height: var(--leading-compact);
+}
+
+:lang(zh-CN),
+:lang(zh-Hans) {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --tracking-label: 0.02em;
+  --leading-heading: 1.24;
+}
+
+:lang(zh-TW),
+:lang(zh-Hant) {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
+  --tracking-label: 0.02em;
+  --leading-heading: 1.24;
+}
+
+:lang(ja) {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Yu Gothic UI", "Noto Sans CJK JP", sans-serif;
+  --tracking-label: 0.02em;
+  --leading-heading: 1.24;
+}
+
+:lang(ko) {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --tracking-label: 0.02em;
+  --leading-heading: 1.24;
+}

@@ -1,0 +1,25 @@
+# Dependencies & build outputs
+node_modules/
+dist/
+dist-desktop/
+release/
+.vite/
+coverage/
+*.log
+.DS_Store
+**/.DS_Store
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Local packaging dumps / old release snapshots
+release*/
+**/RunBuild.app/
+*.app/
